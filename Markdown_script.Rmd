@@ -9,22 +9,137 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+# Ciclismo Casual y Premium
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+## Objetivo del analisis
+El objetivo de este análisis es descubrir los patrones de uso de los consumidores casuales de los premium. De esta forma se podría saber bajo que condiciones el consumidor elige una suscripción en comparación a otra y tratar de aplicar esas ideas para convencer a un usuario casual de se suscriba a la versión premium.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+¿Lo lograre? No tengo idea, pero vamos con todos los huevos a describirlo!!!
 
-```{r cars}
-summary(cars)
+## Sobre la data
+La data de este proyecto contiene la información de los viajes de los usuarios del servicio de alquiler de bicicletas divvy entre los meses de enero de 2021 y enero de 2022. La data es de origen publico y es posible descargarlo del siguiente enlace:
+
+<https://divvy-tripdata.s3.amazonaws.com/index.html>
+
+## Primeros Pasos
+
+Pero primero trabajemos en chiquito. Vamos a importar la data del mes de enero del 2021.
+
+```{r data,warning=FALSE,message=FALSE}
+setwd("/Users/franklinaguilar/Documents/Github/cyclist")
+library(tidyverse)
+library(dplyr)
+data_1 <- read.csv("202101-divvy-tripdata.csv")
 ```
 
-## Including Plots
+Quitamos filas con contenido vacio. Solo voy a trabajar con 2 columnas, asi que me voy a concentrar esas.
 
-You can also embed plots, for example:
+Fuente:
+https://www.diegocalvo.es/eliminar-na-o-valores-nulos-en-r/
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r quitar filas nulas}
+data_1 <- data_1[!is.na(data_1$ended_at),]
+data_1 <- data_1[!is.na(data_1$started_at),]
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+Al parecer esa columnas están bien rellenada
+
+> Google me pide hacer lo siguiente: 
+>
+> 6. Open your spreadsheet and create a column called “ride_length.” Calculate the length of each ride by subtracting the column “started_at” from the column “ended_at” (for example, =D2-C2) and format as HH:MM:SS using Format > Cells > Time > 37:30:55.
+
+En Google Sheets eso es sencillo. Es básicamente agregar una columna y rellenarla con la información transformada de 2 columnas. En R Studio se utiliza la función mutate() junto con as.duration() ya que las fechas no son números.
+
+El atajo para hacer un pipe es "cmd + shift + m" (%>%)
+
+```{r duracion,warning=FALSE,message=FALSE}
+library(lubridate)
+data_2 <- data_1 %>% 
+  mutate(ride_length=as.duration(started_at %--% ended_at))
+```
+
+Vamos a ver los valores de la duración
+
+```{r duracion max min media}
+resumen <- data_2 %>% 
+  summarise(valor_max = max(data_2$ride_length),
+            promedio = mean(data_2$ride_length),
+            valor_min = min(data_2$ride_length))
+
+resumen
+```
+Hay resultados negativos y eso no puede ser. Tambien quiero saber si hay valores cercanos a cero.
+
+```{r intervalo irrelevante}
+intervalo <- data_2 %>% 
+  summarise(negativos = sum(data_2$ride_length < 0),
+            ceros = sum(data_2$ride_length == 0),
+            seg01_min01 = sum(data_2$ride_length > 0 & data_2$ride_length <= 60))
+
+intervalo
+```
+
+Hay un par de valores negativos que debo quitar de la base de datos. No es posible que exista un valor negativo entre 2 horas (a menos que los ciclistas viajen en el tiempo y la ultima vez que investigue eso aun no se puede realizar). También quiero sacar los valores cercanos o iguales a cero porque son casos tan fugaces que son irrelevantes. Sospecho que estos valores cercanos a cero son de personas que estaban a punto de salir y se arrepintieron.
+
+Por otro lado, el intervalo relevante para este análisis comienza entre el minuto 01 y el minuto 60 (1 hora).
+
+```{r intervalo relevante}
+intervalo_2 <- data_2 %>% 
+  summarise(min01_min05 = sum(data_2$ride_length > 60 & data_2$ride_length <= 300),
+            min05_min10 = sum(data_2$ride_length > 300 & data_2$ride_length <= 600),
+            min10_min15 = sum(data_2$ride_length > 600 & data_2$ride_length <= 900),
+            min15_min30 = sum(data_2$ride_length > 900 & data_2$ride_length <= 1800),
+            min30_hora01 = sum(data_2$ride_length > 1800 & data_2$ride_length <= 3600))
+            
+intervalo_2
+```
+La mayoría de usuarios usa su bicicleta entre 5 y 10 minutos. Sin embargo, hay otro pico relevante entre el minuto 15 y 30. Esta a medio camino de un transporte cercano y hacer deporte o ejercicio.
+
+Finalmente una estrepitosa menor cantidad de usuarios usan su bicicleta mas de 1 hora. Considero que este intervalo están aquellos usuarios que realizar ejercicio o realizan entregas delivery, etc.
+
+```{r intervalo curioso}
+intervalo_3 <- data_2 %>% 
+  summarise(mas_de_hora01 = sum(data_2$ride_length > 3600))
+            
+intervalo_3
+```
+> Google me pide hacer los siguiente:
+> 
+> 7. Create a column called “day_of_week,” and calculate the day of the week that each ride started using the “WEEKDAY” command (for example, =WEEKDAY(C2,1)) in each file. Format as General or as a number with no decimals, noting that 1 = Sunday and 7 = Saturday
+
+Pagina de referencia
+https://gt.rstudio.com/reference/fmt_datetime.html
+
+Here are the individual format codes for date components:
+"%u" -> "1" (day of week number in 1..7; Monday is 1, Sunday 7)
+
+```{r dia de la semana,warning=FALSE,message=FALSE}
+library(lubridate)
+data_3 <- data_2 %>% 
+  mutate (day_of_week=weekdays(as.Date(started_at)))
+
+# Estrictamente lo que se requería era:  
+# % mutate(day_of_week=as.numeric(format(as.Date(started_at), format = "%u")))
+# Pero para resumir la informacion me sirve mejor tener "Monday" a "1"
+```
+
+> Google me pide hacer los siguiente:
+> 
+> 8. Proceed to the analyze step. If you like, continue working with the data to better familiarize yourself and perhaps even identify new approaches to answering the business questions.
+
+Bueno esto es un poco mas complicado. Lo primero que quiero hacer es ver en promedio cuantos minutos usa la bicicleta un usuario causual de un premium.
+
+```{r resumir semana}
+data_4 <- data_3 %>% 
+  group_by(day_of_week) %>% 
+  count() %>% 
+  arrange(desc(n))
+
+data_4 
+```
+
+```{r grafico semana}
+ggplot(data = data_3, aes(x=day_of_week)) + geom_bar()
+```
+
+Jueves, Viernes y Sábado son los días mas populares para salir con la bicicleta.
