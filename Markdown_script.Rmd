@@ -29,7 +29,7 @@ Pero primero trabajemos en chiquito. Vamos a importar la data del mes de enero d
 setwd("/Users/franklinaguilar/Documents/Github/cyclist")
 library(tidyverse)
 library(dplyr)
-data_1 <- read.csv("202101-divvy-tripdata.csv")
+data_0 <- read.csv("202101-divvy-tripdata.csv")
 ```
 
 Quitamos filas con contenido vacio. Solo voy a trabajar con 2 columnas, asi que me voy a concentrar esas.
@@ -38,80 +38,79 @@ Fuente:
 https://www.diegocalvo.es/eliminar-na-o-valores-nulos-en-r/
 
 ```{r quitar filas nulas}
-data_1 <- data_1[!is.na(data_1$ended_at),]
-data_1 <- data_1[!is.na(data_1$started_at),]
+data_0 <- data_0[!is.na(data_0$ended_at),]
+data_0 <- data_0[!is.na(data_0$started_at),]
 ```
 
-Al parecer esa columnas están bien rellenada
+Al parecer esa columnas están bien rellenadas
 
-> Google me pide hacer lo siguiente: 
->
-> 6. Open your spreadsheet and create a column called “ride_length.” Calculate the length of each ride by subtracting the column “started_at” from the column “ended_at” (for example, =D2-C2) and format as HH:MM:SS using Format > Cells > Time > 37:30:55.
-
-En Google Sheets eso es sencillo. Es básicamente agregar una columna y rellenarla con la información transformada de 2 columnas. En R Studio se utiliza la función mutate() junto con as.duration() ya que las fechas no son números.
-
-El atajo para hacer un pipe es "cmd + shift + m" (%>%)
+Vamos a crear una columna nueva con la duración del viaje.
 
 ```{r duracion,warning=FALSE,message=FALSE}
 library(lubridate)
-data_2 <- data_1 %>% 
+data_1 <- data_0 %>% 
   mutate(ride_length=as.duration(started_at %--% ended_at))
+```
+
+Vamos a crear una columna etiquetando las duraciones en grupos.
+
+```{r duracion intervalo,warning=FALSE,message=FALSE}
+data_2 <- data_1 %>% 
+  mutate(rango = ifelse(data_1$ride_length < 0, "min_negativos",
+                 ifelse(data_1$ride_length == 0, "min00_ceros",
+                 ifelse(data_1$ride_length > 0 & data_1$ride_length <= 60, "min00_min01",
+                 ifelse(data_1$ride_length > 60 & data_1$ride_length <= 300, "min01_min05",
+                 ifelse(data_1$ride_length > 300 & data_1$ride_length <= 600, "min05_min10",
+                 ifelse(data_1$ride_length > 600 & data_1$ride_length <= 900, "min10_min15",
+                 ifelse(data_1$ride_length > 900 & data_1$ride_length <= 1800, "min15_min30",
+                 ifelse(data_1$ride_length > 1800 & data_1$ride_length <= 3600, "min30_min60", 
+                        "min60_a_mas")))))))))
 ```
 
 Vamos a ver los valores de la duración
 
 ```{r duracion max min media}
 resumen <- data_2 %>% 
-  summarise(valor_max = max(data_2$ride_length),
-            promedio = mean(data_2$ride_length),
-            valor_min = min(data_2$ride_length))
+  group_by(rango) %>% 
+  summarise(cantidad = length(rango),
+            valor_min = min(ride_length),
+            promedio = mean(ride_length),
+            valor_max = max(ride_length))
 
-resumen
+library(knitr)
+kable(resumen)
 ```
-Hay resultados negativos y eso no puede ser. Tambien quiero saber si hay valores cercanos a cero.
+Hay resultados negativos y eso no puede ser.
 
-```{r intervalo irrelevante}
-intervalo <- data_2 %>% 
-  summarise(negativos = sum(data_2$ride_length < 0),
-            ceros = sum(data_2$ride_length == 0),
-            seg01_min01 = sum(data_2$ride_length > 0 & data_2$ride_length <= 60))
+Hay un par de valores negativos que debo quitar de la base de datos. No es posible que exista un valor negativo  (a menos que los ciclistas viajen en el tiempo y la ultima vez que investigue eso aun no se puede realizar). También quiero sacar los valores cercanos o iguales a cero porque son casos tan fugaces que son irrelevantes. Sospecho que estos valores cercanos a cero son de personas que estaban a punto de salir y se arrepintieron.
 
-intervalo
+Solo nos quedamos con valores positivos
+```{r mayores a 1 segundo}
+data_2 <- data_2[data_2$ride_length > 0,]
 ```
 
-Hay un par de valores negativos que debo quitar de la base de datos. No es posible que exista un valor negativo entre 2 horas (a menos que los ciclistas viajen en el tiempo y la ultima vez que investigue eso aun no se puede realizar). También quiero sacar los valores cercanos o iguales a cero porque son casos tan fugaces que son irrelevantes. Sospecho que estos valores cercanos a cero son de personas que estaban a punto de salir y se arrepintieron.
+```{r chequeando}
+resumen_2 <- data_2 %>% 
+  group_by(rango) %>% 
+  summarise(cantidad = length(rango),
+            valor_min = min(ride_length),
+            promedio = mean(ride_length),
+            valor_max = max(ride_length))
 
-Por otro lado, el intervalo relevante para este análisis comienza entre el minuto 01 y el minuto 60 (1 hora).
-
-```{r intervalo relevante}
-intervalo_2 <- data_2 %>% 
-  summarise(min01_min05 = sum(data_2$ride_length > 60 & data_2$ride_length <= 300),
-            min05_min10 = sum(data_2$ride_length > 300 & data_2$ride_length <= 600),
-            min10_min15 = sum(data_2$ride_length > 600 & data_2$ride_length <= 900),
-            min15_min30 = sum(data_2$ride_length > 900 & data_2$ride_length <= 1800),
-            min30_hora01 = sum(data_2$ride_length > 1800 & data_2$ride_length <= 3600))
-            
-intervalo_2
+library(knitr)
+kable(resumen_2)
 ```
-La mayoría de usuarios usa su bicicleta entre 5 y 10 minutos. Sin embargo, hay otro pico relevante entre el minuto 15 y 30. Esta a medio camino de un transporte cercano y hacer deporte o ejercicio.
 
-Finalmente una estrepitosa menor cantidad de usuarios usan su bicicleta mas de 1 hora. Considero que este intervalo están aquellos usuarios que realizar ejercicio o realizan entregas delivery, etc.
+Bacán ahora solo vamos a trabajar con viajes positivos de al menos 1 segundo en adelante.
 
-```{r intervalo curioso}
-intervalo_3 <- data_2 %>% 
-  summarise(mas_de_hora01 = sum(data_2$ride_length > 3600))
-            
-intervalo_3
-```
-> Google me pide hacer los siguiente:
-> 
-> 7. Create a column called “day_of_week,” and calculate the day of the week that each ride started using the “WEEKDAY” command (for example, =WEEKDAY(C2,1)) in each file. Format as General or as a number with no decimals, noting that 1 = Sunday and 7 = Saturday
+La mayoría de usuarios usa su bicicleta entre 5 y 10 minutos (min05_min10). Sin embargo, hay otro pico relevante entre el minuto 15 y 30 (min15_min30). Este ultimo intervalo está a medio camino de un transporte cercano y hacer deporte.
+
+Finalmente una estrepitosa menor cantidad de usuarios usan su bicicleta mas de 1 hora. Considero que este intervalo están aquellos usuarios que realizan ejercicio o realizan entregas delivery, etc.
 
 Pagina de referencia
 https://gt.rstudio.com/reference/fmt_datetime.html
 
-Here are the individual format codes for date components:
-"%u" -> "1" (day of week number in 1..7; Monday is 1, Sunday 7)
+Agregamos una columna adicional con los nombre de los dias de la semana, para saber que dia es el dia mas popular para realizar viajes en bicicleta.
 
 ```{r dia de la semana,warning=FALSE,message=FALSE}
 library(lubridate)
@@ -120,26 +119,61 @@ data_3 <- data_2 %>%
 
 # Estrictamente lo que se requería era:  
 # % mutate(day_of_week=as.numeric(format(as.Date(started_at), format = "%u")))
-# Pero para resumir la informacion me sirve mejor tener "Monday" a "1"
+# Pero para resumir la información me sirve mejor tener "Monday" a "1"
 ```
 
-> Google me pide hacer los siguiente:
-> 
-> 8. Proceed to the analyze step. If you like, continue working with the data to better familiarize yourself and perhaps even identify new approaches to answering the business questions.
+## Analisis
 
-Bueno esto es un poco mas complicado. Lo primero que quiero hacer es ver en promedio cuantos minutos usa la bicicleta un usuario causual de un premium.
-
-```{r resumir semana}
-data_4 <- data_3 %>% 
-  group_by(day_of_week) %>% 
-  count() %>% 
-  arrange(desc(n))
-
-data_4 
-```
+Seria bueno saber los días mas populares para salir con la bicicleta.
 
 ```{r grafico semana}
-ggplot(data = data_3, aes(x=day_of_week)) + geom_bar()
+library(ggplot2)
+library(tidyverse)
+
+data_3$day_of_week <- factor(data_3$day_of_week,
+levels = c('Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'))
+
+ggplot(data = data_3,aes(x=day_of_week)) + 
+  geom_bar() +
+  geom_text(aes(label = ..count..), stat = "count", vjust = -0.3, colour = "black", size=2) +
+  theme(text = element_text(size = 5)) +
+  facet_wrap(~member_casual + rideable_type)
 ```
 
-Jueves, Viernes y Sábado son los días mas populares para salir con la bicicleta.
+Me gustaría saber como pintar las columnas de forma independiente, pero ya lo hare para futuros proyectos. Dejo un link interesante que podria servirme en un futuro.
+https://www.cedricscherer.com/2021/07/05/a-quick-how-to-on-labelling-bar-graphs-in-ggplot2/
+
+Retomando el analisis, los usuarios casuales utilizan el servicio con intensidad los sábados y domingos. A diferencia de los usuarios premium cuyo uso crece durante la semana a partir del martes.
+
+```{r chequeando 2}
+resumen_3 <- data_3 %>% 
+  group_by(member_casual) %>% 
+  summarise(cantidad = length(rango),
+            valor_min = min(ride_length),
+            promedio = mean(ride_length),
+            valor_max = max(ride_length))
+
+library(knitr)
+kable(resumen_3)
+```
+
+Por otro lado, el usuario casual utiliza en menor cantidad el servicio en comparación del usuario premium.
+
+```{r grafico minutos por usuario}
+library(ggplot2)
+library(tidyverse)
+
+ggplot(data = data_3,aes(x=rango)) + 
+  geom_bar() +
+  geom_text(aes(label = ..count..), stat = "count", vjust = -0.3, colour = "black", size=2) +
+  theme(text = element_text(size = 4)) +
+  facet_wrap(~member_casual + rideable_type)
+```
+
+Eureka! Aquí esta algo interesante. Podemos ver que lo usuarios premium no utilizan el servicio de docked_bike.
+
+## Recomendaciones
+
+Yo recomendaría a la gerencia que si quiere que los usuarios casuales a premium que reoriente sus esfuerzos en promociones para el uso de docked_bike.
+
+
